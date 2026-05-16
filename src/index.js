@@ -156,10 +156,28 @@ export function Viewer(data, parent, width, height, font) {
         }
     };
 
-    var camera = new THREE.OrthographicCamera(viewPort.left, viewPort.right, viewPort.top, viewPort.bottom, 1, 19);
-    camera.position.z = 10;
+    // TeamSync fork: widen the near/far frustum from (1, 19) to
+    // (-100000, 100000). The original (1, 19) was tuned for top-down 2D
+    // viewing where Z always sits near 0. Once we orbit, the camera
+    // moves off-axis and parts of the scene end up beyond Z=19 (or
+    // behind Z=1) and disappear. A huge symmetric range keeps every
+    // entity in the frustum at every orbit angle.
+    var camera = new THREE.OrthographicCamera(viewPort.left, viewPort.right, viewPort.top, viewPort.bottom, -100000, 100000);
+    // TeamSync fork: nudge the camera off the polar axis so an initial
+    // left-drag actually rotates. Starting at (cx, cy, 10) directly
+    // above the target (cx, cy, 0) puts the camera at the OrbitControls
+    // spherical singularity -- horizontal drags do nothing and vertical
+    // drags get clamped at phi=0. Offsetting by a small tilt away from
+    // the +Z axis breaks the degeneracy without visibly changing the
+    // initial top-down framing.
+    var modelDiagonal = Math.max(
+        Math.abs(viewPort.right - viewPort.left),
+        Math.abs(viewPort.top - viewPort.bottom)
+    );
+    var tilt = modelDiagonal * 0.001; // ~0.1% of the scene diagonal
     camera.position.x = viewPort.center.x;
-    camera.position.y = viewPort.center.y;
+    camera.position.y = viewPort.center.y - tilt;
+    camera.position.z = modelDiagonal;
 
     var renderer = this.renderer = new THREE.WebGLRenderer();
     renderer.setSize(width, height);
