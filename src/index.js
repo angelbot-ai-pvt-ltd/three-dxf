@@ -252,6 +252,12 @@ export function Viewer(data, parent, width, height, font) {
         var mesh;
         if (entity.type === 'CIRCLE' || entity.type === 'ARC') {
             mesh = drawArc(entity, data);
+        } else if (entity.type === 'POLYLINE' && entity.isPolyfaceMesh) {
+            // TeamSync fork: POLYFACE_MESH is a POLYLINE variant
+            // (flag bit 64) whose vertices interleave mesh-vertices
+            // and face-records. Renders as a triangle mesh, not a
+            // wireframe -- drawLine would only show edges.
+            mesh = drawPolyfaceMesh(entity, data);
         } else if (entity.type === 'LWPOLYLINE' || entity.type === 'LINE' || entity.type === 'POLYLINE') {
             mesh = drawLine(entity, data);
         } else if (entity.type === 'TEXT') {
@@ -295,6 +301,59 @@ export function Viewer(data, parent, width, height, font) {
     // SOLID (2D filled quad); 3DFACE differs in that its vertices have
     // arbitrary Z coords and the entity can degenerate to a triangle
     // when the 3rd and 4th vertices coincide -- handle both cases.
+    // TeamSync fork: render a POLYFACE_MESH (POLYLINE with flag bit 64
+    // set; isPolyfaceMesh=true in dxf-parser's output). Its `vertices`
+    // array interleaves two kinds of records:
+    //   - Mesh vertices: polyfaceMeshVertex=false, carrying x/y/z.
+    //   - Face records:  polyfaceMeshVertex=true, carrying faceA..D
+    //                    as 1-based indices into the mesh-vertex list.
+    // Per DXF spec, negative indices indicate hidden edges; we ignore
+    // that flag for v1 -- faces still render solid.
+    function drawPolyfaceMesh(entity, data) {
+        if (!entity.vertices || entity.vertices.length === 0) return null;
+        var meshVerts = [];
+        var faces = [];
+        for (var i = 0; i < entity.vertices.length; i++) {
+            var v = entity.vertices[i];
+            if (v.polyfaceMeshVertex) {
+                faces.push(v);
+            } else {
+                meshVerts.push(v);
+            }
+        }
+        if (meshVerts.length < 3 || faces.length === 0) return null;
+        var verts = [];
+        function vertAt(idx) {
+            // 1-based; absolute value for hidden-edge negatives.
+            var n = Math.abs(idx) - 1;
+            return meshVerts[n] || null;
+        }
+        for (var j = 0; j < faces.length; j++) {
+            var f = faces[j];
+            var p0 = vertAt(f.faceA);
+            var p1 = vertAt(f.faceB);
+            var p2 = vertAt(f.faceC);
+            var p3 = f.faceD ? vertAt(f.faceD) : null;
+            if (!p0 || !p1 || !p2) continue;
+            // First triangle.
+            addTriangleFacingCamera(verts, p0, p1, p2);
+            // Second triangle for quad faces (when faceD is set and
+            // refers to a distinct vertex). Many polyface meshes use
+            // faceD=0 or faceD=faceC to mean "triangle, not quad".
+            if (p3 && p3 !== p2 && f.faceD !== 0 && f.faceD !== f.faceC) {
+                addTriangleFacingCamera(verts, p0, p2, p3);
+            }
+        }
+        if (verts.length === 0) return null;
+        var geometry = new THREE.BufferGeometry();
+        geometry.setFromPoints(verts);
+        var material = new THREE.MeshBasicMaterial({
+            color: getColor(entity, data),
+            side: THREE.DoubleSide,
+        });
+        return new THREE.Mesh(geometry, material);
+    }
+
     function draw3DFace(entity, data) {
         if (!entity.vertices || entity.vertices.length < 3) return null;
         var verts = [];
