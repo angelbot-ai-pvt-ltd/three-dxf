@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { BufferGeometry, Color, Float32BufferAttribute, Vector3 } from 'three';
-import { OrbitControls } from './OrbitControls';
+// TeamSync fork: switched from the vendored OrbitControls (vintage 2016,
+// listens for `mousewheel` not `wheel`, drags die when the cursor leaves
+// the canvas) to the modern OrbitControls shipped with three.js. The
+// modern one uses pointer events, listens on window for move/up so
+// drags survive cursor escape, and supports touch + Safari trackpads.
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import bSpline from './bspline';
 // TeamSync fork: troika-three-text + @dxfom/mtext were removed because
 // they transitively depend on three-core symbols (CylinderBufferGeometry,
@@ -163,12 +168,18 @@ export function Viewer(data, parent, width, height, font) {
     parent.appendChild(renderer.domElement);
     parent.style.display = 'block';
 
-    //TODO: Need to make this an option somehow so others can roll their own controls.
-    var controls = new OrbitControls(camera, parent);
+    // TeamSync fork: attach OrbitControls to the renderer's canvas
+    // (not the parent div) so pointer events come straight from the
+    // WebGL surface; avoids being blocked by overlay siblings.
+    var controls = new OrbitControls(camera, renderer.domElement);
     controls.target.x = camera.position.x;
     controls.target.y = camera.position.y;
     controls.target.z = 0;
     controls.zoomSpeed = 3;
+    // Enable rotation (default) + screen-space panning for an
+    // orthographic camera so right-drag pans intuitively in pixel space.
+    controls.enableRotate = true;
+    controls.screenSpacePanning = true;
 
     //Uncomment this to disable rotation (does not make much sense with 2D drawings).
     //controls.enableRotate = false;
