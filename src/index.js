@@ -2,8 +2,13 @@ import * as THREE from 'three';
 import { BufferGeometry, Color, Float32BufferAttribute, Vector3 } from 'three';
 import { OrbitControls } from './OrbitControls';
 import bSpline from './bspline';
-import { Text } from 'troika-three-text'
-import { parseDxfMTextContent } from '@dxfom/mtext';
+// TeamSync fork: troika-three-text + @dxfom/mtext were removed because
+// they transitively depend on three-core symbols (CylinderBufferGeometry,
+// PlaneBufferGeometry) that were dropped in three >=0.137. TEXT / MTEXT
+// entities are now skipped silently -- 3D drafting drawings render
+// without text labels, but lines/faces/solids are unaffected. If text
+// support is needed later, vendor in a modern troika-three-text or
+// switch to three-stdlib's TextGeometry.
 
 const textControlCharactersRegex = /\\[AXQWOoLIpfH].*;/g;
 const curlyBraces = /\\[{}]/g;
@@ -200,7 +205,8 @@ export function Viewer(data, parent, width, height, font) {
         } else if (entity.type === 'LWPOLYLINE' || entity.type === 'LINE' || entity.type === 'POLYLINE') {
             mesh = drawLine(entity, data);
         } else if (entity.type === 'TEXT') {
-            mesh = drawText(entity, data);
+            // TeamSync fork: text rendering disabled (see top-of-file note).
+            mesh = null;
         } else if (entity.type === 'SOLID') {
             mesh = drawSolid(entity, data);
         } else if (entity.type === 'POINT') {
@@ -210,7 +216,8 @@ export function Viewer(data, parent, width, height, font) {
         } else if (entity.type === 'SPLINE') {
             mesh = drawSpline(entity, data);
         } else if (entity.type === 'MTEXT') {
-            mesh = drawMtext(entity, data);
+            // TeamSync fork: text rendering disabled (see top-of-file note).
+            mesh = null;
         } else if (entity.type === 'ELLIPSE') {
             mesh = drawEllipse(entity, data);
         } else if (entity.type === 'DIMENSION') {
@@ -251,149 +258,6 @@ export function Viewer(data, parent, width, height, font) {
         return ellipse;
     }
 
-    function drawMtext(entity, data) {
-        var color = getColor(entity, data);
-
-        if (!font) { return console.log('font parameter not set. Ignoring text entity.') }
-
-        var textAndControlChars = parseDxfMTextContent(entity.text);
-
-        //Note: We currently only support a single format applied to all the mtext text
-        var content = mtextContentAndFormattingToTextAndStyle(textAndControlChars, entity, color);
-
-        var txt = createTextForScene(content.text, content.style, entity, color);
-        if (!txt) return null;
-
-        var group = new THREE.Object3D();
-        group.add(txt);
-        return group;
-    }
-
-    function mtextContentAndFormattingToTextAndStyle(textAndControlChars, entity, color) {
-        let activeStyle = {
-            horizontalAlignment: 'left',
-            textHeight: entity.height
-        }
-
-        var text = [];
-        for (let item of textAndControlChars) {
-            if (typeof item === 'string') {
-                if (item.startsWith('pxq') && item.endsWith(';')) {
-                    if (item.indexOf('c') !== -1)
-                        activeStyle.horizontalAlignment = 'center';
-                    else if (item.indexOf('l') !== -1)
-                        activeStyle.horizontalAlignment = 'left';
-                    else if (item.indexOf('r') !== -1)
-                        activeStyle.horizontalAlignment = 'right';
-                    else if (item.indexOf('j') !== -1)
-                        activeStyle.horizontalAlignment = 'justify';
-                } else {
-                    text.push(item);
-                }
-            } else if (Array.isArray(item)) {
-                var nestedFormat = mtextContentAndFormattingToTextAndStyle(item, entity, color);
-                text.push(nestedFormat.text);
-            } else if (typeof item === 'object') {
-                if (item['S'] && item['S'].length === 3) {
-                    text.push(item['S'][0] + '/' + item['S'][2]);
-                } else {
-                    // not yet supported.
-                }
-            }
-        }
-        return {
-            text: text.join(),
-            style: activeStyle
-        }
-    }
-
-    function createTextForScene(text, style, entity, color) {
-        if (!text) return null;
-
-        let textEnt = new Text();
-        textEnt.text = text
-            .replaceAll('\\P', '\n')
-            .replaceAll('\\X', '\n');
-
-        textEnt.font = font;
-        textEnt.fontSize = style.textHeight;
-        textEnt.maxWidth = entity.width;
-        textEnt.position.x = entity.position.x;
-        textEnt.position.y = entity.position.y;
-        textEnt.position.z = entity.position.z;
-        textEnt.textAlign = style.horizontalAlignment;
-        textEnt.color = color;
-        if (entity.rotation) {
-            textEnt.rotation.z = entity.rotation * Math.PI / 180;
-        }
-        if (entity.directionVector) {
-            var dv = entity.directionVector;
-            textEnt.rotation.z = new THREE.Vector3(1, 0, 0).angleTo(new THREE.Vector3(dv.x, dv.y, dv.z));
-        }
-        switch (entity.attachmentPoint) {
-            case 1:
-                // Top Left
-                textEnt.anchorX = 'left';
-                textEnt.anchorY = 'top';
-                break;
-            case 2:
-                // Top Center
-                textEnt.anchorX = 'center';
-                textEnt.anchorY = 'top';
-                break;
-            case 3:
-                // Top Right
-                textEnt.anchorX = 'right';
-                textEnt.anchorY = 'top';
-                break;
-
-            case 4:
-                // Middle Left
-                textEnt.anchorX = 'left';
-                textEnt.anchorY = 'middle';
-                break;
-            case 5:
-                // Middle Center
-                textEnt.anchorX = 'center';
-                textEnt.anchorY = 'middle';
-                break;
-            case 6:
-                // Middle Right
-                textEnt.anchorX = 'right';
-                textEnt.anchorY = 'middle';
-                break;
-
-            case 7:
-                // Bottom Left
-                textEnt.anchorX = 'left';
-                textEnt.anchorY = 'bottom';
-                break;
-            case 8:
-                // Bottom Center
-                textEnt.anchorX = 'center';
-                textEnt.anchorY = 'bottom';
-                break;
-            case 9:
-                // Bottom Right
-                textEnt.anchorX = 'right';
-                textEnt.anchorY = 'bottom';
-                break;
-
-            default:
-                return undefined;
-        };
-
-        textEnt.sync(() => {
-            if (textEnt.textAlign !== 'left') {
-                textEnt.geometry.computeBoundingBox();
-                var textWidth = textEnt.geometry.boundingBox.max.x - textEnt.geometry.boundingBox.min.x;
-                if (textEnt.textAlign === 'center') textEnt.position.x += (entity.width - textWidth) / 2;
-                if (textEnt.textAlign === 'right') textEnt.position.x += (entity.width - textWidth);
-            }
-        });
-
-        return textEnt;
-    }
 
     function drawSpline(entity, data) {
         var color = getColor(entity, data);
@@ -560,28 +424,6 @@ export function Viewer(data, parent, width, height, font) {
         return new THREE.Mesh(geometry, material);
     }
 
-    function drawText(entity, data) {
-        var geometry, material, text;
-
-        if (!font)
-            return console.warn('Text is not supported without a Three.js font loaded with THREE.FontLoader! Load a font of your choice and pass this into the constructor. See the sample for this repository or Three.js examples at http://threejs.org/examples/?q=text#webgl_geometry_text for more details.');
-
-        geometry = new THREE.TextGeometry(entity.text, { font: font, height: 0, size: entity.textHeight || 12 });
-
-        if (entity.rotation) {
-            var zRotation = entity.rotation * Math.PI / 180;
-            geometry.rotateZ(zRotation);
-        }
-
-        material = new THREE.MeshBasicMaterial({ color: getColor(entity, data) });
-
-        text = new THREE.Mesh(geometry, material);
-        text.position.x = entity.startPoint.x;
-        text.position.y = entity.startPoint.y;
-        text.position.z = entity.startPoint.z;
-
-        return text;
-    }
 
     function drawPoint(entity, data) {
         var geometry, material, point;
