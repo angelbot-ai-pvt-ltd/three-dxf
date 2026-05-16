@@ -74,11 +74,20 @@ function getBulgeCurvePoints(startPoint, endPoint, bulge, segments) {
 
     var vertices = [];
 
-    vertices.push(new THREE.Vector3(p0.x, p0.y, 0));
+    // TeamSync fork: preserve Z from the start/end of the bulge arc.
+    // Bulges are 2D by definition (arcs in the XY plane of the parent
+    // polyline), so we linearly interpolate Z from start to end. For a
+    // typical extruded polyline this keeps the curve coplanar with the
+    // rest of the polyline at its elevation.
+    var z0 = startPoint && startPoint.z ? startPoint.z : 0;
+    var z1 = endPoint && endPoint.z ? endPoint.z : z0;
+
+    vertices.push(new THREE.Vector3(p0.x, p0.y, z0));
 
     for (i = 1; i <= segments - 1; i++) {
         vertex = THREEx.Math.polar(center, Math.abs(radius), startAngle + thetaAngle * i);
-        vertices.push(new THREE.Vector3(vertex.x, vertex.y, 0));
+        var t = i / segments;
+        vertices.push(new THREE.Vector3(vertex.x, vertex.y, z0 + (z1 - z0) * t));
     }
 
     return vertices;
@@ -364,7 +373,10 @@ export function Viewer(data, parent, width, height, font) {
                 points.push.apply(points, bulgePoints);
             } else {
                 vertex = entity.vertices[i];
-                points.push(new THREE.Vector3(vertex.x, vertex.y, 0));
+                // TeamSync fork: preserve Z so 3D LINE/POLYLINE wireframes
+                // (the common 3D representation in legacy DWGs) render in
+                // space. Upstream hardcoded Z=0 here, flattening everything.
+                points.push(new THREE.Vector3(vertex.x, vertex.y, vertex.z || 0));
             }
 
         }
