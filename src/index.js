@@ -216,6 +216,18 @@ export function Viewer(data, parent, width, height, font) {
     this.render();
     controls.update();
 
+    // TeamSync fork: expose scene/camera/controls so consumers can
+    // implement section-box clipping, 3D pin projection, distance
+    // measurement, etc. Upstream kept these in a private closure -- not
+    // friendly for any review-tool extension.
+    this.scene = scene;
+    this.camera = camera;
+    this.controls = controls;
+    // Convenience: enable runtime clipping plane support. Materials
+    // declare which planes they respect; with this flag off, any
+    // clippingPlanes setting is silently ignored.
+    renderer.localClippingEnabled = true;
+
     this.resize = function (width, height) {
         var originalWidth = renderer.domElement.width;
         var originalHeight = renderer.domElement.height;
@@ -265,11 +277,46 @@ export function Viewer(data, parent, width, height, font) {
             } else {
                 console.log("Unsupported Dimension type: " + dimTypeEnum);
             }
+        } else if (entity.type === '3DFACE') {
+            // TeamSync fork: render 3DFACE entities as triangle pairs.
+            // 3DFACE has 3 or 4 vertices forming a flat face in 3D space;
+            // dxf-parser exposes them via entity.vertices.
+            mesh = draw3DFace(entity, data);
         }
         else {
             console.log("Unsupported Entity Type: " + entity.type);
         }
         return mesh;
+    }
+
+    // TeamSync fork: render a DXF 3DFACE entity (3 or 4 vertices in 3D
+    // space defining a planar face) as a triangle (or two triangles for
+    // a quad). drawSolid() uses a hardcoded 4-vertex pattern aimed at
+    // SOLID (2D filled quad); 3DFACE differs in that its vertices have
+    // arbitrary Z coords and the entity can degenerate to a triangle
+    // when the 3rd and 4th vertices coincide -- handle both cases.
+    function draw3DFace(entity, data) {
+        if (!entity.vertices || entity.vertices.length < 3) return null;
+        var verts = [];
+        var p0 = entity.vertices[0];
+        var p1 = entity.vertices[1];
+        var p2 = entity.vertices[2];
+        var p3 = entity.vertices[3] || p2;
+        addTriangleFacingCamera(verts, p0, p1, p2);
+        // Only emit the second triangle if it's distinct (non-degenerate quad).
+        if (p3 !== p2 && (p3.x !== p2.x || p3.y !== p2.y || p3.z !== p2.z)) {
+            addTriangleFacingCamera(verts, p0, p2, p3);
+        }
+        var geometry = new THREE.BufferGeometry();
+        geometry.setFromPoints(verts);
+        // DoubleSide so the face renders from either orbit angle (3DFACE
+        // doesn't carry a consistent winding-order convention across
+        // CAD tools).
+        var material = new THREE.MeshBasicMaterial({
+            color: getColor(entity, data),
+            side: THREE.DoubleSide
+        });
+        return new THREE.Mesh(geometry, material);
     }
 
     function drawEllipse(entity, data) {
